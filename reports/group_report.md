@@ -51,10 +51,10 @@ Nhóm triển khai pipeline ETL theo chuỗi: ingest dữ liệu raw CSV, làm s
   thêm vào quality/expectations.py) có ảnh hưởng thực sự, không phải placeholder.
 -->
 
-| Rule / Expectation mới                                                                                                | Trước (số liệu)                                                                    | Sau / khi inject (số liệu)                                                                                              | Chứng cứ                                                                                                                      |
-| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **E7 `corpus_completeness`** (severity: warn) — kiểm tra tất cả 4 `ALLOWED_DOC_IDS` phải có ít nhất 1 chunk sau clean | Standard run `run_id=standard-v1`: `missing_doc_ids=[]` → **PASS**                 | Custom inject (xoá toàn bộ sla_p1_2026 khỏi CSV): `missing_doc_ids=['sla_p1_2026']` → **WARN fires**                    | Log: `expectation[corpus_completeness] OK (warn) :: missing_doc_ids=[]`; unit test inject xác nhận `passed=False`             |
-| **E8 `chunk_id_unique_non_empty`** (severity: halt) — `chunk_id` là primary key ChromaDB, phải không rỗng và duy nhất | Standard run `run_id=standard-v1`: `empty_chunk_ids=0, duplicate_ids=0` → **PASS** | Inject duplicate chunk_id (mock `_stable_chunk_id` trả cùng ID): `duplicate_ids=1` → **HALT fires**, `should_halt=True` | Log: `expectation[chunk_id_unique_non_empty] OK (halt) :: empty_chunk_ids=0, duplicate_ids=0`; unit test inject xác nhận halt |
+| Rule / Expectation mới                                                                                                | Trước (số liệu)                                                              | Sau / khi inject (số liệu)                                                     | Chứng cứ                                                                       |
+| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| **E7 `corpus_completeness`** (severity: warn) — kiểm tra tất cả 4 `ALLOWED_DOC_IDS` phải có ít nhất 1 chunk sau clean | Run sạch final (`run_id=2026-04-15T10-16Z`): `missing_doc_ids=[]` → **PASS** | Kịch bản inject thiếu hẳn 1 doc_id: `missing_doc_ids=['...']` → **WARN fires** | Có trong `quality/expectations.py` và được dùng làm tiêu chí cảnh báo coverage |
+| **E8 `chunk_id_unique_non_empty`** (severity: halt) — `chunk_id` là primary key ChromaDB, phải không rỗng và duy nhất | Run sạch final: `empty_chunk_ids=0, duplicate_ids=0` → **PASS**              | Inject duplicate ID: `duplicate_ids>0` → **HALT fires**, `should_halt=True`    | Có trong `quality/expectations.py`; dùng để bảo vệ idempotency khi publish     |
 
 **Rule chính (baseline + mở rộng):**
 
@@ -78,7 +78,7 @@ Nhóm dùng kịch bản inject theo đúng yêu cầu Sprint 3: `python etl_pip
 
 **Kết quả định lượng (từ CSV / bảng):**
 
-Tại thời điểm cập nhật báo cáo, thư mục `artifacts/eval` trên nhánh `main` chưa có file CSV/JSONL final (`before_after_eval.csv`, `grading_run.jsonl`). Vì vậy, nhóm ghi nhận trạng thái “chờ final run owner” để hoàn tất bằng chứng định lượng cho phần before/after retrieval. Dữ liệu nền hiện có trong manifest (`ci-smoke`, `ci-smoke2`) vẫn ổn định, tạo điều kiện để chạy tiếp vòng inject/eval ngay khi owner final run chốt artifact. Kế hoạch bổ sung bằng chứng là: (1) chạy inject-bad, (2) chạy clean-good, (3) xuất `artifacts/eval/before_after_eval.csv` và `artifacts/eval/grading_run.jsonl`, (4) đính kèm 2 dòng so sánh `contains_expected` và `hits_forbidden` cho câu `q_refund_window`/`q_leave_version`.
+Sau final run, nhóm đã có đầy đủ artifact `artifacts/eval/before_after_eval.csv`, `artifacts/eval/after_inject_bad.csv`, và `artifacts/eval/grading_run.jsonl`. Kết quả thực tế cho thấy cả hai kịch bản clean (`run_id=2026-04-15T10-16Z`) và inject (`run_id=inject-bad`) đều giữ chất lượng retrieval ổn định: 4/4 câu có `contains_expected=yes`, 0/4 câu có `hits_forbidden=yes`, và câu `q_leave_version` giữ `top1_doc_expected=yes`. Với grading, cả ba câu `gq_d10_01`, `gq_d10_02`, `gq_d10_03` đều pass; riêng `gq_d10_03` đạt `top1_doc_matches=true` đúng tiêu chí ranking/versioning. Diễn giải kỹ thuật: rule quarantine `contains_system_error_note` đã chặn sớm chunk stale refund có ghi chú migration, nên khi chạy inject-bad thì bản ghi lỗi vẫn không đi vào collection `day10_kb`.
 
 ---
 
@@ -125,7 +125,6 @@ Day 10 là lớp kiểm soát chất lượng dữ liệu trước khi retrieval
 
 ## 6. Rủi ro còn lại & việc chưa làm
 
-- Chưa có artifact eval/grading final trong `artifacts/eval`; cần owner final run bổ sung trước khi nộp.
 - Chưa có bộ test tự động hoàn chỉnh cho toàn bộ flow inject/eval trên nhánh hiện tại.
 - Dữ liệu sample đang stale theo SLA 24h; cần xác định rõ policy xử lý freshness cho môi trường demo và môi trường thực.
 - Cần khóa checklist “doc khớp src” trước merge để tránh lệch tài liệu khi module kỹ thuật thay đổi nhanh.

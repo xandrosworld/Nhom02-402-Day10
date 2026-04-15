@@ -35,12 +35,16 @@ Tôi phát hiện các điểm này bằng cách đọc chéo 3 lớp: source (`
 
 ## 4. Bằng chứng trước / sau
 
-Tôi dùng bằng chứng tương đương từ manifest (do nhánh hiện tại chưa có `before_after_eval.csv`) để chứng minh tính ổn định sau khi tài liệu được đồng bộ theo code:
+Tôi dùng cả manifest và artifact eval/grading đã có để chứng minh tính ổn định sau khi tài liệu được đồng bộ theo code:
 
-- `run_id=ci-smoke`: `raw_records=10`, `cleaned_records=6`, `quarantine_records=4`, `cleaned_csv=artifacts/cleaned/cleaned_ci-smoke.csv`.
-- `run_id=ci-smoke2`: `raw_records=10`, `cleaned_records=6`, `quarantine_records=4`, `cleaned_csv=artifacts/cleaned/cleaned_ci-smoke2.csv`.
+- `run_id=2026-04-15T10-16Z`: `raw_records=10`, `cleaned_records=5`, `quarantine_records=5`, `cleaned_csv=artifacts/cleaned/cleaned_2026-04-15T10-16Z.csv`.
+- `run_id=inject-bad`: `raw_records=10`, `cleaned_records=5`, `quarantine_records=5`, `cleaned_csv=artifacts/cleaned/cleaned_inject-bad.csv`.
 
-Hai mốc này cho thấy baseline vận hành nhất quán giữa các lần chạy; từ đó tôi có cơ sở để viết phần kiến trúc, contract và runbook theo số liệu thực tế thay vì suy diễn.
+Từ `artifacts/eval/before_after_eval.csv` và `artifacts/eval/after_inject_bad.csv`, cả 4 câu hỏi đều đạt `contains_expected=yes`, `hits_forbidden=no`; với `q_leave_version` giữ `top1_doc_expected=yes`.
+
+Trong `artifacts/eval/grading_run.jsonl`, 3 câu `gq_d10_01`, `gq_d10_02`, `gq_d10_03` đều pass, và `gq_d10_03` có `top1_doc_matches=true`.
+
+Các mốc này cho thấy tài liệu hiện đã bám đúng hiện trạng pipeline final, tránh lệch giữa report và artifact nộp kèm.
 
 ---
 
