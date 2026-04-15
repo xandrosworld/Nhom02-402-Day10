@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -101,7 +102,10 @@ def clean_rows(
             quarantine.append({**raw, "reason": eff_err, "effective_date_raw": eff_raw})
             continue
 
-        if doc_id == "hr_leave_policy" and eff_norm < "2026-01-01":
+        # Rule 3: Dynamic HR Cutoff Date (Distinction requirement)
+        # metric_impact: Không hardcode ngày cutoff, cho phép đổi ngưỡng từ env. Quarantine 1 bản ghi cũ (dòng 7).
+        hr_cutoff = os.environ.get("HR_CUTOFF_DATE", "2026-01-01")
+        if doc_id == "hr_leave_policy" and eff_norm < hr_cutoff:
             quarantine.append(
                 {
                     **raw,
@@ -115,6 +119,12 @@ def clean_rows(
             quarantine.append({**raw, "reason": "missing_chunk_text"})
             continue
 
+        # Rule 1: Quarantine văn bản chứa ghi chú lỗi hệ thống (lỗi migration, bản nháp, deprecated)
+        # metric_impact: Tăng số lượng quarantine thêm 1 dòng đối với policy_refund_v4 có chứa "lỗi migration" (dòng số 3), ngăn AI bị hallucination.
+        if "lỗi migration" in text.lower() or "bản nháp" in text.lower() or "deprecated" in text.lower():
+            quarantine.append({**raw, "reason": "contains_system_error_note"})
+            continue
+
         key = _norm_text(text)
         if key in seen_text:
             quarantine.append({**raw, "reason": "duplicate_chunk_text"})
@@ -122,6 +132,11 @@ def clean_rows(
         seen_text.add(key)
 
         fixed_text = text
+        
+        # Rule 2: Gọt tỉa tiền tố vô nghĩa làm tốn token (FAQ bổ sung, Lưu ý)
+        # metric_impact: Làm sạch/chuẩn hóa format 1 dòng (dòng 10), giúp text nhúng vào VectorDB cô đọng hơn.
+        fixed_text = re.sub(r'^(FAQ bổ sung:\s*|Lưu ý:\s*)', '', fixed_text, flags=re.IGNORECASE).strip()
+
         if apply_refund_window_fix and doc_id == "policy_refund_v4":
             if "14 ngày làm việc" in fixed_text:
                 fixed_text = fixed_text.replace(
