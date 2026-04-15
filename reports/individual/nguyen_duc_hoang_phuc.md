@@ -2,13 +2,14 @@
 
 **Họ và tên:** Nguyễn Đức Hoàng Phúc  
 **Vai trò:** Embed / Evaluation / Grading — Retrieval Owner  
-**Ngày nộp:** 2026-04-15  
+**Ngày nộp:** 2026-04-15
 
 ---
 
 ## 1. Tôi phụ trách phần nào?
 
 File / module:
+
 - eval_retrieval.py
 - grading_run.py
 - docs/quality_report.md
@@ -16,6 +17,7 @@ File / module:
 Tôi chịu trách nhiệm đánh giá retrieval sau pipeline ETL, kiểm tra hit_correct và hits_forbidden, đồng thời xây dựng grading JSONL.
 
 Kết nối:
+
 - Nhận dữ liệu từ ETL pipeline
 - Dựa vào expectation suite
 - Output dùng cho report
@@ -40,51 +42,30 @@ Tôi sử dụng hai metric: hit_correct và hits_forbidden thay vì chỉ accur
 
 ## 3. Một lỗi hoặc anomaly đã xử lý
 
-Trong quá trình chạy `grading_run.py`, tôi gặp lỗi kết nối với embedding provider VoyageAI:
+Anomaly tôi gặp ở vòng final là kết quả inject không còn làm tăng `hits_forbidden` như kỳ vọng ban đầu của kịch bản demo. Tôi đối chiếu `after_inject_bad.csv` với `before_after_eval.csv` và thấy cả hai file đều cho kết quả sạch (`hits_forbidden=no` cho 4/4 câu). Sau khi kiểm tra thêm `quarantine_inject-bad.csv`, tôi xác nhận nguyên nhân là dòng stale refund đã bị chặn từ bước clean do `reason=contains_system_error_note`, nên không đi vào Chroma kể cả khi chạy `--no-refund-fix --skip-validate`.
 
-```bash
-voyageai.error.APIConnectionError: Remote end closed connection without response
-```
-
-Lỗi xảy ra khi Chroma gọi embedding API trong quá trình query. Tôi xác định nguyên nhân là do phụ thuộc vào external API (VoyageAI), dẫn đến mất kết nối hoặc rate limit.
-
-Để xử lý, tôi thêm một fallback vào quá trình gọi API.
-Sau đó chạy lại pipeline:
-
-```python
-python etl_pipeline.py run
-python grading_run.py
-```
-Kết quả ổn định hoàn toàn, xử lí được những trường hợp gặp lỗi. Điều này giúp hệ thống reproducible hơn.
+Tôi cập nhật lại phần diễn giải trong `docs/quality_report.md` theo đúng hiện trạng: lớp bảo vệ đã chuyển lên cleaning/quarantine, vì vậy before/after retrieval ổn định thay vì suy giảm. Việc này giúp báo cáo phản ánh trung thực với artifact final.
 
 ---
 
 ## 4. Bằng chứng trước / sau (80–120 từ)
 
-**run_id:** inject-bad vs clean
+**run_id clean:** `2026-04-15T10-16Z`  
+**run_id inject:** `inject-bad`
 
-**Trước (inject-bad):**
+Từ `artifacts/eval/before_after_eval.csv` và `artifacts/eval/after_inject_bad.csv`:
 
-Top docs: ['...14 ngày...', '...7 ngày...']
-contains_expected = True
-hits_forbidden = True
+- `q_refund_window`: `contains_expected=yes`, `hits_forbidden=no`
+- `q_leave_version`: `contains_expected=yes`, `hits_forbidden=no`, `top1_doc_expected=yes`
 
+Tổng hợp định lượng:
 
-**Sau (clean pipeline):**
+| Scenario   | hit_correct_rate | hits_forbidden_rate |
+| ---------- | ---------------- | ------------------- |
+| Clean run  | 1.0              | 0.0                 |
+| Inject run | 1.0              | 0.0                 |
 
-Top docs: ['...7 ngày...']
-contains_expected = True
-hits_forbidden = False
-
-
-**Tổng hợp:**
-
-| Scenario | hit_correct | hits_forbidden |
-|----------|------------|----------------|
-| Inject bad | 1.0 | 0.25 |
-| Clean pipeline | 1.0 | 0.0 |
-
-Điều này chứng minh rằng cleaning pipeline giúp loại bỏ dữ liệu stale, giảm nhiễu trong retrieval.
+Thêm bằng chứng chấm điểm từ `artifacts/eval/grading_run.jsonl`: cả `gq_d10_01`, `gq_d10_02`, `gq_d10_03` đều pass; riêng `gq_d10_03` có `top1_doc_matches=true`.
 
 ---
 
