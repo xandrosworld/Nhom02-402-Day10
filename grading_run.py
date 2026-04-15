@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -60,7 +61,17 @@ def main() -> int:
         for q in qs:
             text = q["question"]
 
-            res = col.query(query_texts=[text], n_results=args.top_k)
+            for attempt in range(3):
+                try:
+                    res = col.query(query_texts=[text], n_results=args.top_k)
+                    break
+                except Exception as e:
+                    print(f"[WARN] Query failed (attempt {attempt+1}): {e}")
+                    time.sleep(1)
+            else:
+                print("[ERROR] Skipping query due to repeated failure")
+                continue
+            
             docs = (res.get("documents") or [[]])[0]
             metas = (res.get("metadatas") or [[]])[0]
 
