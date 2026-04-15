@@ -7,8 +7,11 @@ Sinh viên có thể thay bằng GE / pydantic / custom — miễn là có halt 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
+
+from transform.cleaning_rules import ALLOWED_DOC_IDS
 
 
 @dataclass
@@ -109,6 +112,37 @@ def run_expectations(cleaned_rows: List[Dict[str, Any]]) -> Tuple[List[Expectati
             ok6,
             "halt",
             f"violations={len(bad_hr_annual)}",
+        )
+    )
+
+    # E7: mỗi doc_id trong ALLOWED_DOC_IDS phải có ít nhất 1 chunk sau clean.
+    # Phát hiện sớm khi toàn bộ một tài liệu bị quarantine (trước khi embed).
+    # metric_impact: standard_run → missing=[]; custom inject (xoá sla_p1_2026) → WARN fires.
+    found_docs = {r.get("doc_id", "") for r in cleaned_rows}
+    missing_docs = sorted(ALLOWED_DOC_IDS - found_docs)
+    ok7 = len(missing_docs) == 0
+    results.append(
+        ExpectationResult(
+            "corpus_completeness",
+            ok7,
+            "warn",
+            f"missing_doc_ids={missing_docs}",
+        )
+    )
+
+    # E8: chunk_id phải không rỗng và duy nhất trong cleaned set.
+    # chunk_id là primary key upsert ChromaDB — ID trùng/rỗng phá vỡ idempotency silently.
+    # metric_impact: standard_run → 0 violations; inject mock _stable_chunk_id → HALT fires.
+    ids = [r.get("chunk_id") or "" for r in cleaned_rows]
+    empty_chunk_ids = sum(1 for cid in ids if not cid)
+    dup_ids = [cid for cid, cnt in Counter(ids).items() if cnt > 1 and cid]
+    ok8 = empty_chunk_ids == 0 and len(dup_ids) == 0
+    results.append(
+        ExpectationResult(
+            "chunk_id_unique_non_empty",
+            ok8,
+            "halt",
+            f"empty_chunk_ids={empty_chunk_ids}, duplicate_ids={len(dup_ids)}",
         )
     )
 
