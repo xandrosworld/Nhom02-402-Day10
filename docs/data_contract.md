@@ -6,24 +6,24 @@ Tài liệu này đồng bộ với [contracts/data_contract.yaml](../contracts/
 
 ## 1. Nguon du lieu (source map)
 
-| Nguon                                                         | Phuong thuc ingest                | Failure mode chinh                                       | Metric / alert                                                            |
-| ------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Nguon                                                         | Phuong thuc ingest                | Failure mode chinh                                                                   | Metric / alert                                                            |
+| ------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | `data/raw/policy_export_dirty.csv`                            | CSV snapshot qua `csv.DictReader` | duplicate chunk, empty fields, doc_id lạ, date không ISO, chứa ghi chú lỗi migration | `raw_records`, `cleaned_records`, `quarantine_records` trong log/manifest |
-| `data/docs/policy_refund_v4.txt`                              | canonical policy source           | stale migration chunk "14 ngày" chèn vào raw             | expectation `refund_no_stale_14d_window` = halt                           |
-| `data/docs/hr_leave_policy.txt`                               | canonical HR source               | xung đột version 10 ngày (cũ) vs 12 ngày (2026)          | quarantine reason `stale_hr_policy_effective_date` + expectation HR halt  |
-| `data/docs/sla_p1_2026.txt` + `data/docs/it_helpdesk_faq.txt` | canonical IT sources              | mật độ chính xác retrieval khi index bị bẩn              | theo dõi qua eval retrieval/grading                                       |
+| `data/docs/policy_refund_v4.txt`                              | canonical policy source           | stale migration chunk "14 ngày" chèn vào raw                                         | expectation `refund_no_stale_14d_window` = halt                           |
+| `data/docs/hr_leave_policy.txt`                               | canonical HR source               | xung đột version 10 ngày (cũ) vs 12 ngày (2026)                                      | quarantine reason `stale_hr_policy_effective_date` + expectation HR halt  |
+| `data/docs/sla_p1_2026.txt` + `data/docs/it_helpdesk_faq.txt` | canonical IT sources              | mật độ chính xác retrieval khi index bị bẩn                                          | theo dõi qua eval retrieval/grading                                       |
 
 ---
 
 ## 2. Schema cleaned
 
-| Cot | Kieu | Bat buoc | Ghi chu |
-| --- | --- | --- | --- |
-| `chunk_id` | string | Co | Sinh ổn định từ `doc_id + chunk_text + seq` để upsert idempotent |
-| `doc_id` | string | Co | Phải nằm trong allowlist (`policy_refund_v4`, `sla_p1_2026`, `it_helpdesk_faq`, `hr_leave_policy`) |
-| `chunk_text` | string | Co | Không được rỗng; expectation cảnh báo nếu < 8 ký tự |
-| `effective_date` | date (`YYYY-MM-DD`) | Co | Cho phép input DMY và chuẩn hóa về ISO |
-| `exported_at` | datetime ISO 8601 | Co | Dùng để tính freshness từ manifest |
+| Cot              | Kieu                | Bat buoc | Ghi chu                                                                                            |
+| ---------------- | ------------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `chunk_id`       | string              | Co       | Sinh ổn định từ `doc_id + chunk_text + seq` để upsert idempotent                                   |
+| `doc_id`         | string              | Co       | Phải nằm trong allowlist (`policy_refund_v4`, `sla_p1_2026`, `it_helpdesk_faq`, `hr_leave_policy`) |
+| `chunk_text`     | string              | Co       | Không được rỗng; expectation cảnh báo nếu < 8 ký tự                                                |
+| `effective_date` | date (`YYYY-MM-DD`) | Co       | Cho phép input DMY và chuẩn hóa về ISO                                                             |
+| `exported_at`    | datetime ISO 8601   | Co       | Dùng để tính freshness từ manifest                                                                 |
 
 ---
 

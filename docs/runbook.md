@@ -28,7 +28,7 @@
 | 1    | Kiểm tra manifest mới nhất và xác định `run_id`  | Xác nhận batch đang phục vụ retrieval                         |
 | 2    | Kiểm tra `cleaned_records`, `quarantine_records` | Nhìn thấy biến động bất thường so với baseline                |
 | 3    | Mở file quarantine và xem cột `reason`           | Tìm được lý do gây fail (unknown doc/date/duplicate/HR stale) |
-| 4    | Đối chiếu expectation fail trong log             | Xác định fail thuộc `warn` hay `halt` (E1..E8)               |
+| 4    | Đối chiếu expectation fail trong log             | Xác định fail thuộc `warn` hay `halt` (E1..E8)                |
 | 5    | Chạy retrieval eval trên bộ câu hỏi mẫu          | Xác nhận tác động đối với câu hỏi refund/HR/SLA               |
 
 Lệnh khuyến nghị:
