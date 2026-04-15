@@ -1,16 +1,17 @@
 # Báo Cáo Nhóm — Lab Day 10: Data Pipeline & Data Observability
 
-**Tên nhóm:** ___________  
+**Tên nhóm:** Nhom02-402-Day10  
 **Thành viên:**
 | Tên | Vai trò (Day 10) | Email |
 |-----|------------------|-------|
-| ___ | Ingestion / Raw Owner | ___ |
-| ___ | Cleaning & Quality Owner | ___ |
-| ___ | Embed & Idempotency Owner | ___ |
-| ___ | Monitoring / Docs Owner | ___ |
+| Mai Tấn Thành (2A202600127) | `etl_pipeline.py`, `.env.example`, `requirements.txt`, `providers.py`, merge + final run | 26ai.thanhmt@vinuni.edu.vn |
+| Đặng Tùng Anh (2A202600026) | `transform/cleaning_rules.py` | 26ai.anhdt2@vinuni.edu.vn |
+| Hồ Nhất Khoa (2A202600066) | `quality/expectations.py`, `monitoring/freshness_check.py` | 26ai.khoahn@vinuni.edu.vn |
+| Nguyễn Đức Hoàng Phúc (2A202600150) | `eval_retrieval.py`, `grading_run.py`, `docs/quality_report.md` | 26ai.phucndh@vinuni.edu.vn |
+| Phạm Lê Hoàng Nam (2A202600416) | `contracts/data_contract.yaml`, `docs/*.md`, `reports/group_report.md` | 26ai.namplh@vinuni.edu.vn |
 
-**Ngày nộp:** ___________  
-**Repo:** ___________  
+**Ngày nộp:** 15/04/2026  
+**Repo:** xandrosworld/Nhom02-402-Day10  
 **Độ dài khuyến nghị:** 600–1000 từ
 
 ---
@@ -27,11 +28,11 @@
 
 **Tóm tắt luồng:**
 
-_________________
+Nhóm triển khai pipeline ETL theo chuỗi: ingest dữ liệu raw CSV, làm sạch và cách ly dữ liệu lỗi, chạy expectation gate, embed vào ChromaDB, ghi manifest và kiểm tra freshness. Nguồn raw hiện tại là `data/raw/policy_export_dirty.csv`; mọi lần chạy đều sinh `run_id` và ghi vào log/manifest để truy vết. Luồng chạy chính sử dụng `etl_pipeline.py run`: gọi `clean_rows()` để tách `cleaned`/`quarantine`, sau đó `run_expectations()` quyết định dừng (`PIPELINE_HALT`) hay cho phép embed. Ở bước embed, collection được upsert theo `chunk_id` và prune id cũ để giữ tính idempotent. Cuối pipeline, hệ thống ghi `manifest_<run_id>.json` rồi kiểm freshness theo SLA. Hai run gần nhất đang có artifact là `ci-smoke` và `ci-smoke2`, đều cho `raw_records=10`, `cleaned_records=6`, `quarantine_records=4`. Kết quả này cho thấy pipeline ổn định trên cùng bộ dữ liệu đầu vào.
 
 **Lệnh chạy một dòng (copy từ README thực tế của nhóm):**
 
-_________________
+`python etl_pipeline.py run`
 
 ---
 
@@ -41,7 +42,7 @@ _________________
 
 ### 2a. Bảng metric_impact (bắt buộc — chống trivial)
 
-<!-- 
+<!--
   BẢNG NÀY LÀ GÌ VÀ DÙNG ĐỂ LÀM GÌ?
   ---
   Theo SCORING.md, mỗi rule/expectation mới phải có "tác động đo được" trên ít nhất một
@@ -50,18 +51,20 @@ _________________
   thêm vào quality/expectations.py) có ảnh hưởng thực sự, không phải placeholder.
 -->
 
-| Rule / Expectation mới | Trước (số liệu) | Sau / khi inject (số liệu) | Chứng cứ |
-|------------------------|-----------------|----------------------------|----------|
-| **E7 `corpus_completeness`** (severity: warn) — kiểm tra tất cả 4 `ALLOWED_DOC_IDS` phải có ít nhất 1 chunk sau clean | Standard run `run_id=standard-v1`: `missing_doc_ids=[]` → **PASS** | Custom inject (xoá toàn bộ sla_p1_2026 khỏi CSV): `missing_doc_ids=['sla_p1_2026']` → **WARN fires** | Log: `expectation[corpus_completeness] OK (warn) :: missing_doc_ids=[]`; unit test inject xác nhận `passed=False` |
-| **E8 `chunk_id_unique_non_empty`** (severity: halt) — `chunk_id` là primary key ChromaDB, phải không rỗng và duy nhất | Standard run `run_id=standard-v1`: `empty_chunk_ids=0, duplicate_ids=0` → **PASS** | Inject duplicate chunk_id (mock `_stable_chunk_id` trả cùng ID): `duplicate_ids=1` → **HALT fires**, `should_halt=True` | Log: `expectation[chunk_id_unique_non_empty] OK (halt) :: empty_chunk_ids=0, duplicate_ids=0`; unit test inject xác nhận halt |
+| Rule / Expectation mới                                                                                                | Trước (số liệu)                                                              | Sau / khi inject (số liệu)                                                     | Chứng cứ                                                                       |
+| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| **E7 `corpus_completeness`** (severity: warn) — kiểm tra tất cả 4 `ALLOWED_DOC_IDS` phải có ít nhất 1 chunk sau clean | Run sạch final (`run_id=2026-04-15T10-16Z`): `missing_doc_ids=[]` → **PASS** | Kịch bản inject thiếu hẳn 1 doc_id: `missing_doc_ids=['...']` → **WARN fires** | Có trong `quality/expectations.py` và được dùng làm tiêu chí cảnh báo coverage |
+| **E8 `chunk_id_unique_non_empty`** (severity: halt) — `chunk_id` là primary key ChromaDB, phải không rỗng và duy nhất | Run sạch final: `empty_chunk_ids=0, duplicate_ids=0` → **PASS**              | Inject duplicate ID: `duplicate_ids>0` → **HALT fires**, `should_halt=True`    | Có trong `quality/expectations.py`; dùng để bảo vệ idempotency khi publish     |
 
 **Rule chính (baseline + mở rộng):**
 
-- …
+- Baseline clean: allowlist `doc_id`, chuẩn hóa `effective_date`, quarantine bản HR cũ, lọc text rỗng, dedupe, và fix refund 14→7.
+- Rule mở rộng từ module transform: cắt tiền tố nhiễu (`FAQ bổ sung`, `Lưu ý`), chặn bản ghi có ghi chú lỗi migration/deprecated, và dùng `HR_CUTOFF_DATE` từ môi trường (không hard-code).
+- Expectation hiện tại gồm E1–E8, trong đó các expectation mức `halt` gồm: `min_one_row`, `no_empty_doc_id`, `refund_no_stale_14d_window`, `effective_date_iso_yyyy_mm_dd`, `hr_leave_no_stale_10d_annual`, `chunk_id_unique_non_empty`; mức `warn` gồm `chunk_min_length_8`, `corpus_completeness`.
 
 **Ví dụ 1 lần expectation fail (nếu có) và cách xử lý:**
 
-_________________
+Khi inject dữ liệu làm trùng `chunk_id`, expectation `chunk_id_unique_non_empty` chuyển sang FAIL mức `halt`; pipeline sẽ dừng nếu không bật `--skip-validate`. Hướng xử lý là kiểm tra logic sinh ID ổn định tại `cleaning_rules.py`, loại nguyên nhân tạo ID trùng, sau đó chạy lại `python etl_pipeline.py run` để xác nhận `duplicate_ids=0`.
 
 ---
 
@@ -71,11 +74,11 @@ _________________
 
 **Kịch bản inject:**
 
-_________________
+Nhóm dùng kịch bản inject theo đúng yêu cầu Sprint 3: `python etl_pipeline.py run --run-id inject-bad --no-refund-fix --skip-validate`. Cách chạy này cố ý giữ lại dữ liệu stale (ví dụ cửa sổ hoàn tiền 14 ngày) và bỏ chặn expectation `halt` để mô phỏng tình huống dữ liệu xấu vẫn đi vào vector store. Kịch bản đối chiếu là chạy pipeline chuẩn (`python etl_pipeline.py run --run-id clean-good`) rồi thực hiện đánh giá retrieval.
 
 **Kết quả định lượng (từ CSV / bảng):**
 
-_________________
+Sau final run, nhóm đã có đầy đủ artifact `artifacts/eval/before_after_eval.csv`, `artifacts/eval/after_inject_bad.csv`, và `artifacts/eval/grading_run.jsonl`. Kết quả thực tế cho thấy cả hai kịch bản clean (`run_id=2026-04-15T10-16Z`) và inject (`run_id=inject-bad`) đều giữ chất lượng retrieval ổn định: 4/4 câu có `contains_expected=yes`, 0/4 câu có `hits_forbidden=yes`, và câu `q_leave_version` giữ `top1_doc_expected=yes`. Với grading, cả ba câu `gq_d10_01`, `gq_d10_02`, `gq_d10_03` đều pass; riêng `gq_d10_03` đạt `top1_doc_matches=true` đúng tiêu chí ranking/versioning. Diễn giải kỹ thuật: rule quarantine `contains_system_error_note` đã chặn sớm chunk stale refund có ghi chú migration, nên khi chạy inject-bad thì bản ghi lỗi vẫn không đi vào collection `day10_kb`.
 
 ---
 
@@ -83,7 +86,7 @@ _________________
 
 > SLA bạn chọn, ý nghĩa PASS/WARN/FAIL trên manifest mẫu.
 
-<!-- 
+<!--
   PHẦN NÀY LÀ GÌ?
   Giải thích kết quả freshness_check trong log — bắt buộc theo SCORING mục 3 (quality report
   có run_id + interpret). Dữ liệu do Hồ Nhất Khoa cung cấp từ monitoring/freshness_check.py.
@@ -96,17 +99,19 @@ _________________
 - **Boundary 1 — ingest** (`latest_exported_at`): độ tươi của dữ liệu nguồn (CSV export).
 - **Boundary 2 — publish** (`run_timestamp`): thời điểm pipeline chạy và embed vào ChromaDB.
 
-**Kết quả trên sample CSV (`run_id=standard-v1`):**
+**Kết quả trên sample CSV (`run_id=ci-smoke2`):**
 
 ```
 freshness_check=FAIL {
-  "ingest_boundary": {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 127.2, "status": "FAIL"},
-  "publish_boundary": {"run_timestamp": "2026-04-15T09:30:00+00:00", "age_hours": 0.5, "status": "PASS"},
-  "pipeline_lag_hours": 126.7
+  "sla_hours": 24.0,
+  "ingest_boundary": {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 122.092, "status": "FAIL"},
+  "publish_boundary": {"run_timestamp": "2026-04-14T19:54:31.156431+00:00", "age_hours": 14.184, "status": "PASS"},
+  "pipeline_lag_hours": 107.909,
+  "reason": "freshness_sla_exceeded"
 }
 ```
 
-**Giải thích:** `freshness_check=FAIL` là **hành vi đúng và có chủ đích** với sample CSV — dữ liệu nguồn được export ngày 10/04, vượt SLA 24h so với ngày chạy lab (15/04). Tuy nhiên `publish_boundary=PASS` xác nhận pipeline đã chạy và embed thành công gần đây. SLA áp cho **độ tươi của dữ liệu nguồn** (ingest), không áp cho thời điểm pipeline. Chi tiết đầy đủ trong `docs/runbook.md`.
+**Giải thích:** `FAIL` đến từ ingest boundary vì dữ liệu nguồn đã cũ hơn SLA 24 giờ. Đồng thời, publish boundary vẫn `PASS`, chứng tỏ pipeline chạy gần đây và publish thành công. Cách đọc này giúp tách bạch lỗi “dữ liệu nguồn stale” với lỗi “pipeline không chạy”. Chi tiết hướng xử lý đã ghi tại `docs/runbook.md`.
 
 ---
 
@@ -114,10 +119,12 @@ freshness_check=FAIL {
 
 > Dữ liệu sau embed có phục vụ lại multi-agent Day 09 không? Nếu có, mô tả tích hợp; nếu không, giải thích vì sao tách collection.
 
-_________________
+Day 10 là lớp kiểm soát chất lượng dữ liệu trước khi retrieval/agent hoạt động. Nếu bỏ qua clean + expectation gate, agent Day 09 có thể truy hồi nhầm version policy dù prompt đúng. Vì vậy, collection `day10_kb` được dùng như đầu vào đã qua chuẩn hóa và quan sát được (log, manifest, quarantine) để giảm rủi ro trả lời sai ngữ cảnh.
 
 ---
 
 ## 6. Rủi ro còn lại & việc chưa làm
 
-- …
+- Chưa có bộ test tự động hoàn chỉnh cho toàn bộ flow inject/eval trên nhánh hiện tại.
+- Dữ liệu sample đang stale theo SLA 24h; cần xác định rõ policy xử lý freshness cho môi trường demo và môi trường thực.
+- Cần khóa checklist “doc khớp src” trước merge để tránh lệch tài liệu khi module kỹ thuật thay đổi nhanh.

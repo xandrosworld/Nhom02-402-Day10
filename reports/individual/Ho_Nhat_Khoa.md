@@ -30,31 +30,39 @@ Vì lý do đó, tôi quyết định `severity="halt"`: dừng pipeline ngay kh
 
 ## 3. Một lỗi hoặc anomaly đã xử lý
 
-**Anomaly**: `freshness_check=FAIL` ngay cả khi pipeline vừa chạy xong.
+**Anomaly**: Freshness báo `FAIL` dù pipeline vừa chạy và publish thành công.
 
-Sau lần chạy đầu tiên với `run_id=standard-v1`, log ghi `freshness_check=FAIL {"age_hours": 127.2}`. Ban đầu tôi nghĩ đây là lỗi code. Sau khi đọc kỹ `freshness_check.py`, tôi phát hiện hàm cũ dùng `latest_exported_at` (timestamp trong CSV nguồn, ngày `2026-04-10T08:00:00`) làm **duy nhất** mốc đo — không phải `run_timestamp` (khi pipeline chạy).
+Ở run final `run_id=2026-04-15T10-16Z`, tôi quan sát trạng thái `publish_boundary=PASS` nhưng tổng kết freshness vẫn `FAIL`. Ban đầu dễ nhầm đây là lỗi monitor. Khi đối chiếu dữ liệu nguồn, tôi xác nhận nguyên nhân nằm ở ingest boundary: `latest_exported_at` của sample CSV là `2026-04-10T08:00:00`, đã quá SLA 24h.
 
-Vấn đề: `latest_exported_at` phản ánh **độ tươi của dữ liệu nguồn**, không phải **độ tươi của pipeline**. Với CSV mẫu có `exported_at=2026-04-10`, freshness sẽ luôn FAIL sau 24 giờ dù pipeline chạy bất cứ lúc nào.
+Tôi xử lý bằng cách tách rõ hai ranh giới trong `freshness_check.py`:
 
-Fix: nâng cấp lên 2-boundary — đo cả `latest_exported_at` (ingest boundary) lẫn `run_timestamp` (publish boundary). Sau khi fix, log hiển thị rõ: `"ingest_boundary": {"status": "FAIL", "age_hours": 127.2}` và `"publish_boundary": {"status": "PASS", "age_hours": 0.5}`. Đây là hành vi **đúng và có chủ đích**: dữ liệu nguồn cũ (FAIL) nhưng pipeline đã chạy gần đây (PASS). Runbook giải thích SLA áp cho ingest, không áp cho publish.
+- ingest boundary phản ánh độ tươi dữ liệu nguồn,
+- publish boundary phản ánh độ tươi vận hành pipeline.
+
+Nhờ đó, báo cáo freshness vừa đúng kỹ thuật vừa hữu ích cho vận hành: biết chính xác fail do upstream stale data hay do pipeline không chạy.
 
 ---
 
 ## 4. Bằng chứng trước / sau
 
-**run_id `standard-v1`** — log `artifacts/logs/run_standard-v1.log`:
+**run_id `2026-04-15T10-16Z`** và **run_id `inject-bad`**:
 
 ```
-# TRƯỚC (freshness_check.py cũ — 1 boundary):
-freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 127.2, "sla_hours": 24}
-
-# SAU (freshness_check.py mới — 2 boundary):
-freshness_check=FAIL {"sla_hours": 24, "ingest_boundary": {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 127.2, "status": "FAIL"}, "publish_boundary": {"run_timestamp": "2026-04-15T09:30:00+00:00", "age_hours": 0.481, "status": "PASS"}, "pipeline_lag_hours": 126.719, "reason": "freshness_sla_exceeded"}
+freshness_check=FAIL {
+	"sla_hours": 24.0,
+	"ingest_boundary": {"status": "FAIL", ...},
+	"publish_boundary": {"status": "PASS", ...},
+	"pipeline_lag_hours": ...,
+	"reason": "freshness_sla_exceeded"
+}
 ```
 
-`pipeline_lag_hours` dương (~127 giờ) vì pipeline chạy sau khi dữ liệu được export 5 ngày — đây là bình thường. FAIL đến từ ingest boundary (data cũ), publish boundary vẫn PASS (pipeline vừa chạy).
+Điểm quan trọng là cấu trúc output hiện đã thể hiện đầy đủ hai boundary để giải thích đúng nguyên nhân fail.
 
-Kết quả grading (`run_id=standard-v1`): `gq_d10_01 contains_expected=yes, hits_forbidden=no`; `gq_d10_03 top1_doc_matches=yes`.
+Kết quả grading final trong `artifacts/eval/grading_run.jsonl`:
+
+- `gq_d10_01`: `contains_expected=true`, `hits_forbidden=false`
+- `gq_d10_03`: `top1_doc_matches=true`
 
 ---
 

@@ -1,150 +1,101 @@
-# Quality report — Lab Day 10 (nhóm)
+# Quality Report — Lab Day 10
 
-**run_id:** 2026-04-15T09-12Z (clean) / inject-bad (corruption test)  
-**Ngày:** 2026-04-15
+**run_id:** `2026-04-15T10-16Z`  
+**inject run:** `inject-bad`  
+**date:** `2026-04-15`
 
----
+## 1. Run summary
 
-## 1. Tóm tắt số liệu
+Clean run:
 
-| Chỉ số | Trước (inject-bad) | Sau (clean pipeline) | Ghi chú |
-|--------|-------------------|----------------------|---------|
-| raw_records | 10 | 10 | Dữ liệu đầu vào giữ nguyên |
-| cleaned_records | 6 | 6 | Sau cleaning rules |
-| quarantine_records | 4 | 4 | Các record lỗi bị loại |
-| Expectation halt? | FAIL (skip-validate) | PASS | Inject cố tình bypass validation |
+- `raw_records=10`
+- `cleaned_records=5`
+- `quarantine_records=5`
+- collection: `day10_kb`
+- embedding: `voyage-multilingual-2`
 
----
+Inject run:
 
-## 2. Before / after retrieval (bắt buộc)
+- `raw_records=10`
+- `cleaned_records=5`
+- `quarantine_records=5`
+- flags: `--no-refund-fix --skip-validate`
 
-> File kết quả:
-- `artifacts/eval/after_inject_bad.csv`
+## 2. Expectation results
+
+The final clean run passed all active expectations:
+
+- `min_one_row`
+- `no_empty_doc_id`
+- `refund_no_stale_14d_window`
+- `chunk_min_length_8`
+- `effective_date_iso_yyyy_mm_dd`
+- `hr_leave_no_stale_10d_annual`
+- `corpus_completeness`
+- `chunk_id_unique_non_empty`
+
+Measured impact from the new rules:
+
+- the stale HR 2025 row was quarantined
+- the legacy catalog row was quarantined
+- duplicate refund content was quarantined
+- malformed and missing-date rows were blocked before publish
+
+## 3. Retrieval and grading evidence
+
+Files:
+
 - `artifacts/eval/before_after_eval.csv`
+- `artifacts/eval/after_inject_bad.csv`
+- `artifacts/eval/grading_run.jsonl`
 
----
+Final clean eval:
 
-### Câu hỏi then chốt: refund window (`q_refund_window`)
+- `4/4` queries had `contains_expected=yes`
+- `0/4` queries had `hits_forbidden=yes`
+- `q_leave_version` kept `top1_doc_expected=yes`
 
-**Trước (inject-bad):**
+Grading with the lecturer's updated question set:
 
-- Top docs:
-  - "14 ngày làm việc" ❌ (stale)
-  - "7 ngày làm việc" ✅ (correct)
-- contains_expected = True  
-- hits_forbidden = True  
+- `gq_d10_01`: pass
+- `gq_d10_02`: pass with `resolution = 4 giờ`
+- `gq_d10_03`: pass with `top1_doc_matches=true`
 
-👉 Context chứa cả thông tin đúng và sai (rất nguy hiểm)
+## 4. Before / after interpretation
 
----
+For the final code state, retrieval stays stable between the clean run and the later `inject-bad` run:
 
-**Sau (clean pipeline):**
+- `q_refund_window` still returns the correct `7 ngày làm việc`
+- `hits_forbidden=no` in both eval CSV files
+- overall retrieval summary remains `hit_correct_rate=1.0` and `hits_forbidden_rate=0.0`
 
-- Top docs:
-  - chỉ còn "7 ngày làm việc" ✅
-- contains_expected = True  
-- hits_forbidden = False  
+Reason:
 
-👉 Context sạch hoàn toàn, không còn stale data
+The stricter cleaning rules now quarantine the stale refund row before publish because it is recognized as a bad export / system-note record. That means `--no-refund-fix --skip-validate` is no longer enough to let that stale refund chunk survive into Chroma.
 
----
+This changes where the protection happens:
 
-### Merit: HR policy version (`q_leave_version`)
+- before: corruption could survive longer and be seen in retrieval
+- now: corruption is blocked earlier at cleaning / quarantine
 
-**Trước (inject-bad):**
+## 5. Freshness and observability
 
-- Top doc: `hr_leave_policy`
-- contains_expected = True  
-- hits_forbidden = False  
-- top1_doc_expected = đúng
+Freshness result from the clean run:
 
-👉 Tuy chưa bị ảnh hưởng trực tiếp, nhưng context có dấu hiệu nhiễu từ policy khác
+- SLA: `24h`
+- `ingest_boundary`: `FAIL`
+- `publish_boundary`: `PASS`
+- `pipeline_lag_hours`: about `122.278`
 
----
+This is expected on the provided sample because `latest_exported_at=2026-04-10T08:00:00` is older than the configured SLA. The monitor still adds value because it separates upstream stale data from successful publish timing.
 
-**Sau (clean pipeline):**
+## 6. Conclusion
 
-- Top doc: `hr_leave_policy`
-- contains_expected = True  
-- hits_forbidden = False  
-- top1_doc_expected = đúng
+The final Day 10 pipeline is stable and observable:
 
-👉 Retrieval ổn định và chính xác
+- only cleaned data is published to `day10_kb`
+- bad rows are quarantined before embed
+- grading passes all three required questions on the updated question set
+- freshness monitoring reports both ingest and publish boundaries
 
----
-
-### Tổng kết retrieval
-
-| Scenario | hit_correct | hits_forbidden |
-|----------|------------|----------------|
-| Inject bad | 1.0 | 0.25 |
-| Clean pipeline | 1.0 | 0.0 |
-
-👉 Mặc dù accuracy không đổi, nhưng chất lượng context cải thiện rõ rệt
-
----
-
-## 3. Freshness & monitor
-
-Kết quả:
-
-```json
-freshness_check = FAIL
-{
-  "latest_exported_at": "2026-04-10T08:00:00",
-  "age_hours": ~121,
-  "sla_hours": 24,
-  "reason": "freshness_sla_exceeded"
-}
-```
-
-Giải thích:
-
-- SLA được chọn: 24 giờ
-- Dữ liệu đã cũ ~121 giờ → vượt SLA
-
-=> FAIL là đúng behavior, giúp phát hiện data outdated trước khi ảnh hưởng downstream
-
----
-
-## 4. Corruption inject (Sprint 3)
-**Cách inject:**
-
-Sử dụng:
-
-```python
-python etl_pipeline.py run --run-id inject-bad --no-refund-fix --skip-validate
-```
-
-**Loại corruption:**
-
-- Stale policy: refund window = 14 ngày (thay vì 7)
-- Bypass validation để dữ liệu lỗi vẫn được embed
-
-**Cách phát hiện:**
-1. Expectation suite:
-
-```bash
-refund_no_stale_14d_window → FAIL
-```
-
-2. Retrieval evaluation:
-- hits_forbidden tăng từ 0.0 → 0.25
-- xuất hiện chunk chứa "14 ngày"
-
-**Insight quan trọng:**
-
-- Model vẫn trả lời đúng (hit_correct = 1.0)
-- Nhưng context bị nhiễu (hits_forbidden > 0)
-
-👉 Đây là failure mode nguy hiểm trong RAG system
-
----
-
-## 5. Hạn chế & việc chưa làm
-
-- Chưa tự động visualize before/after (chart)
-- Chưa có threshold alert cho hits_forbidden
-- Chưa implement retry / fallback cho embedding provider (VoyageAI)
-- Chưa kiểm soát contamination giữa các topic (cross-policy noise)
-- Chưa có lineage tracking chi tiết theo chunk level
+In the final version of the project, the strongest measurable impact is visible in quarantine behavior, expectation results, and stable retrieval quality after publish.

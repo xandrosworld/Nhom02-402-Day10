@@ -25,7 +25,7 @@ Tùng Anh phụ trách cleaning rule, Nhất Khoa phụ trách expectation và m
 
 **Bằng chứng (commit / comment trong code):**
 
-Các thay đổi chính nằm ở `providers.py`, `etl_pipeline.py`, `eval_retrieval.py`, `grading_run.py`; các lần chạy thử dùng `run_id` như `2026-04-15T08-50Z` và `inject-bad`.
+Các thay đổi chính nằm ở `providers.py`, `etl_pipeline.py`, `eval_retrieval.py`, `grading_run.py`; các lần chạy kiểm chứng gần nhất dùng `run_id` `2026-04-15T10-16Z` và `inject-bad`.
 
 ---
 
@@ -39,13 +39,7 @@ Tôi cũng chủ động dùng collection riêng `day10_kb` thay vì dùng lại
 
 ## 3. Một lỗi hoặc anomaly đã xử lý (100–150 từ)
 
-Lỗi mất thời gian nhất tôi gặp là custom embedding function cho Voyage chưa tương thích hoàn toàn với ChromaDB. Lúc đầu `etl_pipeline.py run` dừng ở bước tạo collection vì object embedding thiếu method `name()`. Sửa xong lỗi đó, `eval_retrieval.py` lại fail tiếp vì Chroma còn yêu cầu `embed_query()`. Nói ngắn gọn, ý tưởng dùng Voyage là đúng, nhưng phần interface chưa khớp contract của Chroma.
-
-Tôi xử lý bằng cách bổ sung đầy đủ các method `name()`, `embed_documents()` và `embed_query()` trong `providers.py`. Sau đó pipeline chạy lại ổn và log của run `2026-04-15T08-50Z` ghi:
-
-`embed_upsert count=6 collection=day10_kb provider=voyage model=voyage-multilingual-2`
-
-Một lỗi khác là Claudible key không chạy được với endpoint kiểu Anthropic. Tôi đổi sang `chat.completions` với `CLAUDIBLE_BASE_URL=https://claudible.io/v1`, sau đó `eval_retrieval.py --llm-judge` mới chạy ổn.
+Anomaly đáng chú ý ở vòng final là: tôi kỳ vọng kịch bản `inject-bad` sẽ làm retrieval giảm chất lượng, nhưng kết quả thực tế vẫn ổn định (không tăng `hits_forbidden`). Ban đầu điều này dễ bị hiểu nhầm là lệnh inject không hoạt động. Khi đối chiếu `cleaned_inject-bad.csv`, `quarantine_inject-bad.csv` và expectation log, tôi xác nhận pipeline vẫn chạy đúng; khác biệt nằm ở chỗ rule mới đã quarantine sớm dòng stale refund có ghi chú migration (`contains_system_error_note`) trước khi vào embed. Vì vậy, dù bật `--no-refund-fix`, chunk sai vẫn không đi vào Chroma. Đây là tín hiệu tốt cho kiến trúc hiện tại: phòng thủ dữ liệu được đẩy lên sớm ở lớp cleaning/quarantine thay vì chờ tới lớp retrieval mới phát hiện.
 
 ---
 
@@ -53,22 +47,18 @@ Một lỗi khác là Claudible key không chạy được với endpoint kiểu
 
 Tôi dùng hai lần chạy thật:
 
-- run sạch: `2026-04-15T08-50Z`
+- run sạch: `2026-04-15T10-16Z`
 - run inject: `inject-bad`
 
-Trong `artifacts/eval/before_after_eval.csv`, câu `q_refund_window` cho kết quả:
+Trong `artifacts/eval/before_after_eval.csv`, câu `q_refund_window` có:
 
 `contains_expected=yes, hits_forbidden=no`
 
-Sau khi chạy:
+Sau inject và eval lại ở `artifacts/eval/after_inject_bad.csv`, kết quả vẫn là:
 
-`python -X utf8 etl_pipeline.py run --run-id inject-bad --no-refund-fix --skip-validate`
+`contains_expected=yes, hits_forbidden=no`
 
-và eval lại vào `artifacts/eval/after_inject_bad.csv`, cùng câu đó đổi thành:
-
-`contains_expected=yes, hits_forbidden=yes`
-
-Điều này cho thấy khi bỏ refund fix và vẫn publish dữ liệu xấu, retrieval vẫn nhìn thấy context stale `14 ngày`. Đây là phần bằng chứng rõ nhất cho mục tiêu “before/after evidence” của Day 10.
+Với toàn bộ 4 câu hỏi, cả hai file eval đều cho `4/4 contains_expected=yes` và `0/4 hits_forbidden=yes`. Kết quả này phản ánh đúng trạng thái pipeline final: dữ liệu stale đã bị chặn tại bước clean/quarantine trước khi embed.
 
 ---
 
