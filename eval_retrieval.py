@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 Đánh giá retrieval đơn giản — before/after khi pipeline đổi dữ liệu embed.
-
-Không bắt buộc LLM: chỉ kiểm tra top-k chunk có chứa keyword kỳ vọng hay không
-(tiếp nối tinh thần Day 08/09 nhưng tập trung data layer).
 """
 
 from __future__ import annotations
@@ -54,24 +51,30 @@ Return JSON only:
     }
 
 
+def summarize(rows):
+    total = len(rows)
+    correct = sum(1 for r in rows if r["contains_expected"] == "yes")
+    forbidden = sum(1 for r in rows if r["hits_forbidden"] == "yes")
+
+    return {
+        "total": total,
+        "hit_correct_rate": round(correct / total, 3) if total else 0,
+        "hits_forbidden_rate": round(forbidden / total, 3) if total else 0,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--questions",
         default=str(ROOT / "data" / "test_questions.json"),
-        help="JSON danh sách câu hỏi golden (retrieval)",
     )
     parser.add_argument(
         "--out",
         default=str(ROOT / "artifacts" / "eval" / "before_after_eval.csv"),
-        help="CSV kết quả",
     )
     parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument(
-        "--llm-judge",
-        action="store_true",
-        help="Dùng Claudible để chấm retrieval support như phần mở rộng.",
-    )
+    parser.add_argument("--llm-judge", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -92,6 +95,7 @@ def main() -> int:
 
     client = chromadb.PersistentClient(path=db_path)
     emb = get_chroma_embedding_function()
+
     try:
         col = client.get_collection(name=collection_name, embedding_function=emb)
     except Exception as e:
@@ -115,27 +119,43 @@ def main() -> int:
         "llm_judge_grounded",
         "llm_judge_note",
     ]
+
+    rows = []
+
     with out_path.open("w", encoding="utf-8", newline="") as fcsv:
         w = csv.DictWriter(fcsv, fieldnames=fieldnames)
         w.writeheader()
+
         for q in questions:
             text = q["question"]
+
             res = col.query(query_texts=[text], n_results=args.top_k)
             docs = (res.get("documents") or [[]])[0]
             metas = (res.get("metadatas") or [[]])[0]
+
             top_doc = (metas[0] or {}).get("doc_id", "") if metas else ""
             preview = (docs[0] or "")[:180].replace("\n", " ") if docs else ""
+
             blob = " ".join(docs).lower()
             must_any = [x.lower() for x in q.get("must_contain_any", [])]
             forbidden = [x.lower() for x in q.get("must_not_contain", [])]
+
             ok_any = any(m in blob for m in must_any) if must_any else True
             bad_forb = any(m in blob for m in forbidden) if forbidden else False
+
+            # DEBUG (rất hữu ích khi demo)
+            print(f"\n[DEBUG] Q: {text}")
+            print(f"Top docs: {docs[:2]}")
+            print(f"Expected match: {ok_any}, Forbidden hit: {bad_forb}")
+
             want_top1 = (q.get("expect_top1_doc_id") or "").strip()
             top1_expected = ""
             if want_top1:
                 top1_expected = "yes" if top_doc == want_top1 else "no"
+
             llm_grounded = ""
             llm_note = ""
+
             if args.llm_judge:
                 try:
                     judged = llm_judge(text, docs, must_any=must_any, forbidden=forbidden)
@@ -144,24 +164,31 @@ def main() -> int:
                 except Exception as e:
                     llm_grounded = "error"
                     llm_note = str(e)
-            w.writerow(
-                {
-                    "question_id": q.get("id", ""),
-                    "question": text,
-                    "top1_doc_id": top_doc,
-                    "top1_preview": preview,
-                    "contains_expected": "yes" if ok_any else "no",
-                    "hits_forbidden": "yes" if bad_forb else "no",
-                    "top1_doc_expected": top1_expected,
-                    "top_k_used": args.top_k,
-                    "embedding_provider": get_embedding_provider(),
-                    "embedding_model": model_name,
-                    "llm_judge_grounded": llm_grounded,
-                    "llm_judge_note": llm_note,
-                }
-            )
 
-    print(f"Wrote {out_path}")
+            row = {
+                "question_id": q.get("id", ""),
+                "question": text,
+                "top1_doc_id": top_doc,
+                "top1_preview": preview,
+                "contains_expected": "yes" if ok_any else "no",
+                "hits_forbidden": "yes" if bad_forb else "no",
+                "top1_doc_expected": top1_expected,
+                "top_k_used": args.top_k,
+                "embedding_provider": get_embedding_provider(),
+                "embedding_model": model_name,
+                "llm_judge_grounded": llm_grounded,
+                "llm_judge_note": llm_note,
+            }
+
+            rows.append(row)
+            w.writerow(row)
+
+    # ===== SUMMARY =====
+    summary = summarize(rows)
+    print("\n=== EVAL SUMMARY ===")
+    print(summary)
+
+    print(f"\nWrote {out_path}")
     return 0
 
 
